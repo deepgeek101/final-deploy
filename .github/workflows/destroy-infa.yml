@@ -1,0 +1,47 @@
+name: Destroy Infra
+# Tears down the AWS infra for an environment. Use with care — this is destructive.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment to destroy
+        type: choice
+        options: [dev, prod]
+        default: dev
+        required: true
+      confirm:
+        description: Type the environment name to confirm destruction
+        type: string
+        required: true
+permissions:
+  id-token: write # OIDC → AWS
+  contents: read
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+  TARGET_ENV: ${{ github.event.inputs.environment || 'dev' }}
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    # Picking prod trips its GitHub Environment's required-reviewer gate.
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+    steps:
+      - name: Verify confirmation input matches environment
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "${{ github.event.inputs.environment }}" ]; then
+            echo "Confirmation text does not match selected environment. Aborting."
+            exit 1
+          fi
+      - uses: actions/checkout@v7
+      - name: Authenticate to AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+      - name: Terraform destroy
+        run: |
+          cd "terraform/envs/$TARGET_ENV"
+          terraform init -input=false
+          terraform plan -destroy -input=false
+          terraform destroy -auto-approve -input=false
